@@ -53,8 +53,4 @@ Use a tool like Hardhat or Truffle to deploy the contract to the Avalanche Fuji 
 Test on Testnet
 
 Perform tests on the deployed contract to ensure it works as expected on the testnet.
-Deployment Instructions
-Prerequisites
-Node.js and npm installed.
-Hardhat or Truffle installed.
-Avalanche Fuji Testnet setup.
+
