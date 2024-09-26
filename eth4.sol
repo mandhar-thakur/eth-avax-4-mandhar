@@ -1,85 +1,153 @@
 // SPDX-License-Identifier: MIT
-pragma solidity >=0.8.2;
+pragma solidity 0.8.19;
 
-contract DegenGamingToken {
-    string public tokenName = "Degen Gaming Token";
-    string public symbol = "DGT";
-    uint public decimals = 18;
-    uint public totalSupply;
-    address public owner;
+interface IERC20 {
+    function totalSupply() external view returns (uint);
+    function balanceOf(address account) external view returns (uint);
+    function transfer(address recipient, uint amount) external returns (bool);
+    
+    event Transfer(address indexed from, address indexed to, uint amount);
+}
 
-    mapping(address => uint) public balanceOf;
-    mapping(uint => Item) public storeItems;
-    uint256 public nextItemId;
+contract ERC20 is IERC20 {
+    address public immutable owner;
+    uint public override totalSupply;
+    mapping (address => uint) public override balanceOf;
 
-    struct Item {
-        uint id;
-        string name;
-        uint price;
-        uint stock;
+    struct Transaction {
+        uint transactionId;
+        address sender;
+        address receiver;
+        uint amount;
+        uint timestamp;
     }
+    
+    mapping(uint => Transaction) public transactions;
+    uint public transactionCount;
 
-    event Transfer(address indexed from, address indexed to, uint value);
-    event Mint(address indexed to, uint value);
-    event Burn(address indexed from, uint value);
-    event ItemAdded(uint256 id, string name, uint price, uint256 stock);
-    event ItemPurchased(address indexed buyer, uint itemId, uint256 quantity);
+    // Event to log transaction data
+    event TransactionRecorded(uint indexed transactionId, address indexed sender, address indexed receiver, uint amount, uint timestamp);
 
-    modifier onlyOwner() {
-        require(msg.sender == owner, "Only owner can perform this action");
-        _;
+    // Armor related structures and events
+    enum ArmorLevel { None, Level1, Level2, Level3, Level4, Level5 }
+    
+    struct Armor {
+        ArmorLevel level;
+        uint purchaseTimestamp;
     }
+    
+    mapping(address => Armor[]) public userArmors;
+    
+    // Event to log armor purchases
+    event ArmorPurchased(address indexed buyer, ArmorLevel level, uint cost, uint timestamp);
+
+    // Define armor costs (in tokens)
+    mapping(ArmorLevel => uint) public armorCosts;
+
+    // Token metadata
+    string public constant name = "Degen";
+    string public constant symbol = "DGN";
+    uint8 public constant decimals = 0;
 
     constructor() {
         owner = msg.sender;
+        totalSupply = 0;
+
+        // Initialize armor costs
+        armorCosts[ArmorLevel.Level1] = 100; 
+        armorCosts[ArmorLevel.Level2] = 200;
+        armorCosts[ArmorLevel.Level3] = 300;
+        armorCosts[ArmorLevel.Level4] = 400;
+        armorCosts[ArmorLevel.Level5] = 500;
     }
 
-    function mint(address to, uint value) public onlyOwner {
-        totalSupply += value;
-        balanceOf[to] += value;
-        emit Mint(to, value);
+    modifier onlyOwner {
+        require(msg.sender == owner, "Only the contract owner can execute this function");
+        _;
     }
 
-    function transfer(address to, uint value) public returns (bool success) {
-        require(balanceOf[msg.sender] >= value, "Insufficient balance");
-        balanceOf[msg.sender] -= value;
-        balanceOf[to] += value;
-        emit Transfer(msg.sender, to, value);
+    function transfer(address recipient, uint amount) external override returns (bool) {
+        require(balanceOf[msg.sender] >= amount, "The balance is insufficient");
+
+        balanceOf[msg.sender] -= amount;
+        balanceOf[recipient] += amount;
+
+        // Record the transaction
+        recordTransaction(msg.sender, recipient, amount);
+
+        emit Transfer(msg.sender, recipient, amount);
         return true;
     }
 
-    function burn(uint value) public returns (bool success) {
-        require(balanceOf[msg.sender] >= value, "Insufficient balance");
-        balanceOf[msg.sender] -= value;
-        totalSupply -= value;
-        emit Burn(msg.sender, value);
+    function mint(address receiver, uint amount) external onlyOwner {
+        balanceOf[receiver] += amount;
+        totalSupply += amount;
+        emit Transfer(address(0), receiver, amount);
+    }
+
+    function burn(uint amount) external {
+        require(amount > 0, "Amount should not be zero");
+        require(balanceOf[msg.sender] >= amount, "The balance is insufficient");
+        balanceOf[msg.sender] -= amount;
+        totalSupply -= amount;
+
+        emit Transfer(msg.sender, address(0), amount);
+    }
+
+    function recordTransaction(address sender, address receiver, uint amount) internal {
+        transactionCount++;
+        transactions[transactionCount] = Transaction({
+            transactionId: transactionCount,
+            sender: sender,
+            receiver: receiver,
+            amount: amount,
+            timestamp: block.timestamp
+        });
+        emit TransactionRecorded(transactionCount, sender, receiver, amount, block.timestamp);
+    }
+
+    function getTransactions() external view returns (Transaction[] memory) {
+        Transaction[] memory allTransactions = new Transaction[](transactionCount);
+        
+        for (uint i = 1; i <= transactionCount; i++) {
+            allTransactions[i - 1] = transactions[i];
+        }
+        
+        return allTransactions;
+    }
+
+    // Function to purchase armor
+    function purchaseArmor(ArmorLevel level) external returns (bool) {
+        require(level >= ArmorLevel.Level1 && level <= ArmorLevel.Level5, "Invalid armor level");
+
+        uint cost = armorCosts[level];
+        require(balanceOf[msg.sender] >= cost, "Insufficient token balance to purchase armor");
+
+        // Deduct the cost from the user's balance
+        balanceOf[msg.sender] -= cost;
+        totalSupply -= cost; // Assuming tokens are burned upon purchase
+
+        emit Transfer(msg.sender, address(0), cost);
+
+        // Record the armor purchase
+        userArmors[msg.sender].push(Armor({
+            level: level,
+            purchaseTimestamp: block.timestamp
+        }));
+
+        emit ArmorPurchased(msg.sender, level, cost, block.timestamp);
+
         return true;
     }
 
-    function balance(address account) public view returns (uint) {
-        return balanceOf[account];
+    // Function to get a user's armor details
+    function getUserArmors(address user) external view returns (Armor[] memory) {
+        return userArmors[user];
     }
 
-    function addItem(string memory itemName, uint price, uint stock) public onlyOwner {
-        storeItems[nextItemId] = Item(nextItemId, itemName, price, stock);
-        emit ItemAdded(nextItemId, itemName, price, stock);
-        nextItemId++;
-    }
-
-    function getItem(uint itemId) public view returns (Item memory) {
-        return storeItems[itemId];
-    }
-
-    function purchaseItem(uint itemId, uint quantity) public {
-        Item storage item = storeItems[itemId];
-        require(item.stock >= quantity, "Insufficient item stock");
-        uint totalPrice = item.price * quantity;
-        require(balanceOf[msg.sender] >= totalPrice, "Insufficient balance to purchase item");
-
-        balanceOf[msg.sender] -= totalPrice;
-        totalSupply -= totalPrice;
-        item.stock -= quantity;
-
-        emit ItemPurchased(msg.sender, itemId, quantity);
+    // Optional: Function for the owner to update armor costs
+    function setArmorCost(ArmorLevel level, uint cost) external onlyOwner {
+        require(level >= ArmorLevel.Level1 && level <= ArmorLevel.Level5, "Invalid armor level");
+        armorCosts[level] = cost;
     }
 }
